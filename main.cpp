@@ -8,6 +8,10 @@
 #include <QOpenGLBuffer>
 #include <QOpenGLVertexArrayObject>
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
 #include <filament/Texture.h>
 #include <utils/Entity.h>
 #include <filament/Engine.h>
@@ -24,6 +28,7 @@
 #include <filament/RenderTarget.h>
 #include <filament/Fence.h>
 
+#include "filament_renderer.h"
 #include "CocoaGLContext.h"
 //------------------------------------------------------------------------------
 
@@ -35,29 +40,43 @@ public:
     }
 
     virtual ~RenderWidget() {
-        // Wait until all rendered operations are completed before we destroy
-        // anything.
-        filament::Fence::waitAndDestroy(mEngine->createFence());
-
-        mEngine->destroy(mMainCamera);
-        mEngine->destroy(mView);
-        mEngine->destroy(mRenderer);
-        mEngine->destroy(mSwapChain);
-
-        // Make sure we clean up the swap chain before killing the engine.
-        mEngine->flushAndWait();
-
-        filament::Engine::destroy(&mEngine);
+        delete m_filament_renderer;
 
         delete m_program;
     }
 
+    void loadFile(const std::string &pFile)
+    {
+        using namespace Assimp;
+        // Create an instance of the Importer class
+        mImporter = std::make_unique<Importer>();
+
+        // And have it read the given file with some example postprocessing
+        // Usually - if speed is not the most important aspect for you - you'll
+        // probably to request more postprocessing than we do in this example.
+        const aiScene* scene = mImporter->ReadFile( pFile,
+                                                    aiProcess_CalcTangentSpace       |
+                                                    aiProcess_Triangulate            |
+                                                    aiProcess_JoinIdenticalVertices  |
+                                                    aiProcess_FixInfacingNormals     |
+                                                    aiProcess_SortByPType);
+
+        // If the import failed, report it
+        if( !scene)
+        {
+            qInfo() << "Failed to load scene";
+            return;
+        }
+        qInfo() << "Loaded scene successfully";
+
+        qInfo() << "Num meshes: " << scene->mNumMeshes;
+
+        m_filament_renderer->setScene(scene, pFile);
+    }
+
     void renderFilament()
     {
-        if (mRenderer->beginFrame(mSwapChain)) {
-            mRenderer->render(mView);
-            mRenderer->endFrame();
-        }
+        m_filament_renderer->draw();
     }
 
     void renderFilamentTexture()
@@ -88,13 +107,13 @@ protected:
 
         float quadVertices[] = { // vertex attributes for a quad that fills the entire screen in Normalized Device Coordinates.
             // positions   // texCoords
-            -0.5f,  0.5f,  0.0f, 1.0f,
-            -0.5f, -0.5f,  0.0f, 0.0f,
-            0.5f, -0.5f,  1.0f, 0.0f,
+            -1.0f,  1.0f,  0.0f, 1.0f,
+            -1.0f, -1.0f,  0.0f, 0.0f,
+            1.0f, -1.0f,  1.0f, 0.0f,
 
-            -0.5f,  0.5f,  0.0f, 1.0f,
-            0.5f, -0.5f,  1.0f, 0.0f,
-            0.5f,  0.5f,  1.0f, 1.0f
+            -1.0f,  1.0f,  0.0f, 1.0f,
+            1.0f, -1.0f,  1.0f, 0.0f,
+            1.0f,  1.0f,  1.0f, 1.0f
         };
 
         if (!m_program)
@@ -144,13 +163,15 @@ protected:
             m_program->release();
         }
 
-        if (!mEngine) {
+        if (!m_filament_renderer) {
             void *nativewindow = reinterpret_cast<void*>(winId());
+
+            int render_dim = 256;
 
             // create texture for render target in qt's opengl context
             glGenTextures(1, &m_col_texture_id);
             glBindTexture(GL_TEXTURE_2D, m_col_texture_id);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 100, 100, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, render_dim, render_dim, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -159,42 +180,10 @@ protected:
 
             qInfo() << "shared context: " << sharedContext;
 
-            auto backend = filament::Engine::Backend::OPENGL;
-            mEngine = filament::Engine::create(backend, nullptr, sharedContext);
-            mSwapChain = mEngine->createSwapChain(nativewindow);
-            mRenderer = mEngine->createRenderer();
+            m_filament_renderer = new FilamentRenderer();
+            m_filament_renderer->init(nativewindow, sharedContext, render_dim, render_dim, m_col_texture_id);
 
-            filament::Texture* tex_col = filament::Texture::Builder()
-                .width(100)
-                .height(100)
-                .levels(1)
-                .usage(filament::Texture::Usage::COLOR_ATTACHMENT | filament::Texture::Usage::SAMPLEABLE)
-                .format(filament::Texture::InternalFormat::RGB8)
-                .import(m_col_texture_id)
-                .build(*mEngine);
-
-            filament::RenderTarget* target = filament::RenderTarget::Builder()
-                .texture(filament::RenderTarget::COLOR, tex_col)
-                //.texture(filament::RenderTarget::DEPTH, tex_depth)
-                .build(*mEngine);
-
-            mMainCamera = mEngine->createCamera();
-            mScene = mEngine->createScene();
-            mView = mEngine->createView();
-
-            mView->setClearColor({0.125, 0.125, 0.25, 0.0});
-            mView->setScene(mScene);
-
-            // mView->setViewport({0, 0, static_cast<uint32_t>(m_viewportSize.width()),
-            //                     static_cast<uint32_t>(m_viewportSize.height())});
-            mView->setViewport({0, 0, 100, 100});
-            mView->setRenderTarget(target);
-            mView->setCamera(mMainCamera);
-
-            // Flush the back buffer
-            while (!mRenderer->beginFrame(mSwapChain));
-            mRenderer->render(mView);
-            mRenderer->endFrame();
+            m_filament_renderer->resize(width(), height());
         }
     }
 
@@ -207,12 +196,10 @@ protected:
     unsigned int m_quad_vao;
     unsigned int m_quad_vbo;
 
-    filament::Engine* mEngine = nullptr;
-    filament::SwapChain* mSwapChain = nullptr;
-    filament::Renderer* mRenderer = nullptr;
-    filament::Scene* mScene = nullptr;
-    filament::View* mView = nullptr;
-    filament::Camera *mMainCamera = nullptr;
+    FilamentRenderer *m_filament_renderer = nullptr;
+
+    // The asset scene importer.
+    std::unique_ptr<Assimp::Importer> mImporter;
 };
 
 //------------------------------------------------------------------------------
@@ -227,8 +214,9 @@ public:
     }
 
 protected:
-    virtual void drawBackground(QPainter *painter, const QRectF &rect) override
+    virtual void drawBackground(QPainter *painter, const QRectF &) override
     {
+        qInfo() << "rendering background";
         painter->beginNativePainting();
         m_render_widget->renderFilament();
         m_render_widget->renderFilamentTexture();
@@ -259,9 +247,18 @@ int main(int argc, char **argv)
     view.setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
     view.setScene(scene);
     view.resize(600, 600);
+    scene->addText("Hello World");
     view.show();
 
-    scene->addText("Hello World");
+    // force repaint and flush back buffer
+    rg->repaint();
+    view.repaint();
+    if (argc == 2) {
+        rg->loadFile(argv[1]);
+    }
+    // force repaint and flush back buffer
+    view.repaint();
+    rg->repaint();
 
     return app.exec();
 }

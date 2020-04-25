@@ -107,13 +107,13 @@ protected:
 
         float quadVertices[] = { // vertex attributes for a quad that fills the entire screen in Normalized Device Coordinates.
             // positions   // texCoords
-            -1.0f,  1.0f,  0.0f, 1.0f,
-            -1.0f, -1.0f,  0.0f, 0.0f,
-            1.0f, -1.0f,  1.0f, 0.0f,
+            -0.5f,  0.5f,  0.0f, 1.0f,
+            -0.5f, -0.5f,  0.0f, 0.0f,
+            0.5f, -0.5f,  1.0f, 0.0f,
 
-            -1.0f,  1.0f,  0.0f, 1.0f,
-            1.0f, -1.0f,  1.0f, 0.0f,
-            1.0f,  1.0f,  1.0f, 1.0f
+            -0.5f,  0.5f,  0.0f, 1.0f,
+            0.5f, -0.5f,  1.0f, 0.0f,
+            0.5f,  0.5f,  1.0f, 1.0f
         };
 
         if (!m_program)
@@ -174,6 +174,7 @@ protected:
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, render_dim, render_dim, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glBindTexture(GL_TEXTURE_2D, 0);
 
             QVariant ctx = context()->nativeHandle();
             void *sharedContext = GetCocoaGLContext(ctx);
@@ -250,15 +251,9 @@ int main(int argc, char **argv)
     scene->addText("Hello World");
     view.show();
 
-    // force repaint and flush back buffer
-    rg->repaint();
-    view.repaint();
     if (argc == 2) {
         rg->loadFile(argv[1]);
     }
-    // force repaint and flush back buffer
-    view.repaint();
-    rg->repaint();
 
     return app.exec();
 }

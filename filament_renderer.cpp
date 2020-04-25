@@ -100,7 +100,7 @@ void FilamentRenderer::init(void* nativewindow, void *sharedContext,
 {
     auto backend = filament::Engine::Backend::OPENGL;
     mEngine = filament::Engine::create(backend, nullptr, sharedContext);
-    mSwapChain = mEngine->createSwapChain(nativewindow);
+    mSwapChain = mEngine->createSwapChain(nullptr);
     mRenderer = mEngine->createRenderer();
     mMainCamera = mEngine->createCamera();
     mScene = mEngine->createScene();
@@ -151,6 +151,9 @@ void FilamentRenderer::init(void* nativewindow, void *sharedContext,
     auto& tcm = mEngine->getTransformManager();
     tcm.create(mRoot);
     tcm.setTransform(tcm.getInstance(mRoot), root_xform);
+
+    // flush back buffer
+    draw();
 }
 
 //------------------------------------------------------------------------------
